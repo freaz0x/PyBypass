@@ -1,5 +1,5 @@
 # Image officielle Playwright — tout est déjà installé (Chromium + dépendances)
-FROM mcr.microsoft.com/playwright/python:v1.52.0-noble
+FROM mcr.microsoft.com/playwright/python:v1.60.0-noble
 
 WORKDIR /app
 
