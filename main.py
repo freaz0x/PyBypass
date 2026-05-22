@@ -2,6 +2,7 @@
 import asyncio
 import os
 import subprocess
+import time
 from playwright.async_api import async_playwright
 from fastapi import FastAPI, Query, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,19 +14,28 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 # 🔐 Token secret — même valeur que dans worker.ts
 SCRAPER_TOKEN = "change-moi-avant-deploy-2024"
 
-# 🖥️ Lance Xvfb au démarrage pour simuler un écran (nécessaire sur Render)
-# headless=False obligatoire sinon Cloudflare détecte le bot
+# 🖥️ Lance Xvfb et attend qu'il soit prêt avant de continuer
+HEADLESS = False
+
 def start_xvfb():
+    global HEADLESS
     try:
-        subprocess.Popen(["Xvfb", ":99", "-screen", "0", "1280x800x24"])
+        subprocess.Popen(["Xvfb", ":99", "-screen", "0", "1280x800x24", "-ac"])
         os.environ["DISPLAY"] = ":99"
-        print("✅ Xvfb démarré sur :99")
+        # Attend que le display soit vraiment accessible (max 5s)
+        for _ in range(10):
+            result = subprocess.run(["xdpyinfo", "-display", ":99"], capture_output=True)
+            if result.returncode == 0:
+                print("✅ Xvfb démarré sur :99")
+                return
+            time.sleep(0.5)
+        # Si xdpyinfo pas dispo, on attend juste 2s
+        time.sleep(2)
+        print("✅ Xvfb démarré sur :99 (sans xdpyinfo)")
     except Exception as e:
         print(f"⚠️  Xvfb non disponible: {e} — mode headless forcé")
-        global HEADLESS
         HEADLESS = True
 
-HEADLESS = False
 start_xvfb()
 
 
@@ -108,7 +118,7 @@ async def scrape_endpoint(
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "headless": HEADLESS}
+    return {"status": "ok", "headless": HEADLESS, "display": os.environ.get("DISPLAY", "non défini")}
 
 
 if __name__ == "__main__":
