@@ -1,6 +1,7 @@
-# server_scraper.py - Serveur Playwright pour Cloudflare Worker
+# server_scraper.py
 import asyncio
 import os
+import subprocess
 from playwright.async_api import async_playwright
 from fastapi import FastAPI, Query, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,15 +10,26 @@ import uvicorn
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# 🔐 Token secret — mis en dur ici, changer avant de déployer
+# 🔐 Token secret — même valeur que dans worker.ts
 SCRAPER_TOKEN = "change-moi-avant-deploy-2024"
 
-# ⚠️ headless=False OBLIGATOIRE — sinon Cloudflare détecte le bot
+# 🖥️ Lance Xvfb au démarrage pour simuler un écran (nécessaire sur Render)
+# headless=False obligatoire sinon Cloudflare détecte le bot
+def start_xvfb():
+    try:
+        subprocess.Popen(["Xvfb", ":99", "-screen", "0", "1280x800x24"])
+        os.environ["DISPLAY"] = ":99"
+        print("✅ Xvfb démarré sur :99")
+    except Exception as e:
+        print(f"⚠️  Xvfb non disponible: {e} — mode headless forcé")
+        global HEADLESS
+        HEADLESS = True
+
 HEADLESS = False
+start_xvfb()
 
 
 async def get_json_visible(url: str, wait_time: int = 6000):
-    """Lance Playwright visible, intercepte le JSON de multi-search.fr."""
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=HEADLESS,
@@ -25,6 +37,7 @@ async def get_json_visible(url: str, wait_time: int = 6000):
                 '--disable-blink-features=AutomationControlled',
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
             ]
         )
 
@@ -58,7 +71,6 @@ async def get_json_visible(url: str, wait_time: int = 6000):
 
         await page.wait_for_timeout(wait_time)
 
-        # Fallback JS globals si rien intercepté
         if not json_result['found']:
             data_found = await page.evaluate("""
                 () => {
@@ -82,7 +94,6 @@ async def scrape_endpoint(
     wait_time: int = Query(default=6000),
     x_scraper_token: str | None = Header(default=None),
 ):
-    # 🔐 Vérification du token
     if x_scraper_token != SCRAPER_TOKEN:
         raise HTTPException(status_code=401, detail="Token invalide")
 
@@ -97,7 +108,7 @@ async def scrape_endpoint(
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "headless": HEADLESS}
 
 
 if __name__ == "__main__":
